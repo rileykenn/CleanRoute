@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useMapsLibrary } from '@vis.gl/react-google-maps';
 import { Location } from '@/lib/types';
 
@@ -19,18 +19,29 @@ export default function PlacesAutocomplete({
   className = '',
   id,
 }: PlacesAutocompleteProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const places = useMapsLibrary('places');
   const [value, setValue] = useState(defaultValue);
   const callbackRef = useRef(onPlaceSelect);
   callbackRef.current = onPlaceSelect;
 
-  useEffect(() => {
-    if (!places || !inputRef.current) return;
+  // Use a callback ref so we know exactly when the input DOM element mounts
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [inputReady, setInputReady] = useState(false);
 
-    // Avoid re-initializing
-    if (autocompleteRef.current) return;
+  const setInputRef = useCallback((node: HTMLInputElement | null) => {
+    inputRef.current = node;
+    setInputReady(!!node);
+  }, []);
+
+  useEffect(() => {
+    if (!places || !inputRef.current || !inputReady) return;
+
+    // Clean up any existing instance first
+    if (autocompleteRef.current) {
+      google.maps.event.clearInstanceListeners(autocompleteRef.current);
+      autocompleteRef.current = null;
+    }
 
     const autocomplete = new places.Autocomplete(inputRef.current, {
       fields: ['formatted_address', 'geometry', 'place_id', 'name'],
@@ -60,11 +71,11 @@ export default function PlacesAutocomplete({
         autocompleteRef.current = null;
       }
     };
-  }, [places]);
+  }, [places, inputReady]);
 
   return (
     <input
-      ref={inputRef}
+      ref={setInputRef}
       id={id}
       type="text"
       value={value}
