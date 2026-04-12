@@ -1,65 +1,460 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+import { useReducer, useEffect, useMemo, useState, useRef } from 'react';
+import { APIProvider, Map, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { AnimatePresence, motion } from 'framer-motion';
+
+import { scheduleReducer, createInitialState } from '@/lib/scheduleReducer';
+import { calculateAllTravel, calculateScheduleTimes, calculateDaySummary } from '@/lib/routeEngine';
+import { formatDateDisplay, generateId } from '@/lib/timeUtils';
+import { TravelSegment as TravelSegmentType, Client } from '@/lib/types';
+
+import TeamTabs from '@/components/TeamTabs';
+import ClientCard from '@/components/ClientCard';
+import AddClientButton from '@/components/AddClientButton';
+import TravelSegmentComponent from '@/components/TravelSegment';
+import DailySummaryCard from '@/components/DailySummary';
+import RouteMap from '@/components/RouteMap';
+import PlacesAutocomplete from '@/components/PlacesAutocomplete';
+
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || '';
+
+export default function SchedulerApp() {
+  const [state, dispatch] = useReducer(scheduleReducer, null, createInitialState);
+  const [directionsService, setDirectionsService] = useState<google.maps.DirectionsService | null>(null);
+  const [mobileShowMap, setMobileShowMap] = useState(false);
+
+  const activeTeam = useMemo(
+    () => state.teams.find((t) => t.id === state.activeTeamId) || state.teams[0],
+    [state.teams, state.activeTeamId]
   );
+
+  // Calculate client times whenever travel segments change
+  const clientsWithTimes = useMemo(
+    () => calculateScheduleTimes(activeTeam),
+    [activeTeam]
+  );
+
+  // Update client times in state
+  useEffect(() => {
+    if (clientsWithTimes.length > 0) {
+      const hasChanges = clientsWithTimes.some((c, i) => {
+        const original = activeTeam.clients[i];
+        return original && (c.startTime !== original.startTime || c.endTime !== original.endTime);
+      });
+      if (hasChanges) {
+        dispatch({ type: 'SET_CLIENT_TIMES', teamId: activeTeam.id, clients: clientsWithTimes });
+      }
+    }
+  }, [clientsWithTimes, activeTeam.id, activeTeam.clients]);
+
+  // Calculate day summary
+  const summary = useMemo(() => calculateDaySummary(activeTeam), [activeTeam]);
+
+  // Stable route key — only changes when addresses/order actually change, not when times update
+  const routeKey = useMemo(() => {
+    const base = activeTeam.baseAddress
+      ? `${activeTeam.baseAddress.lat},${activeTeam.baseAddress.lng}`
+      : 'none';
+    const clients = activeTeam.clients
+      .map((c) => `${c.id}:${c.location.lat},${c.location.lng}`)
+      .join('|');
+    return `${activeTeam.id}::${base}::${clients}`;
+  }, [activeTeam.id, activeTeam.baseAddress, activeTeam.clients]);
+
+  // Store activeTeam in a ref so the calculation callback always reads the latest
+  const activeTeamRef = useRef(activeTeam);
+  activeTeamRef.current = activeTeam;
+
+  // Recalculate travel only when routes actually change (not when times update)
+  useEffect(() => {
+    if (!directionsService || !activeTeamRef.current.baseAddress || activeTeamRef.current.clients.length === 0) return;
+
+    const teamId = activeTeamRef.current.id;
+
+    // Clear existing travel data
+    dispatch({ type: 'CLEAR_TRAVEL', teamId });
+
+    const timer = setTimeout(async () => {
+      await calculateAllTravel(directionsService, activeTeamRef.current, (segment) => {
+        dispatch({ type: 'UPDATE_TRAVEL', teamId, segment });
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [routeKey, directionsService]);
+
+  // Optimize route — reorder clients for shortest total driving
+  const optimizeRoute = () => {
+    if (!directionsService || !activeTeam.baseAddress || activeTeam.clients.length < 2) return;
+
+    const origin = { lat: activeTeam.baseAddress.lat, lng: activeTeam.baseAddress.lng };
+    const waypoints: google.maps.DirectionsWaypoint[] = activeTeam.clients.map((c) => ({
+      location: { lat: c.location.lat, lng: c.location.lng },
+      stopover: true,
+    }));
+
+    directionsService.route(
+      {
+        origin,
+        destination: origin, // return to base
+        waypoints,
+        travelMode: google.maps.TravelMode.DRIVING,
+        optimizeWaypoints: true,
+      },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          const optimizedOrder = result.routes[0]?.waypoint_order;
+          if (optimizedOrder) {
+            const reorderedClients: Client[] = optimizedOrder.map(
+              (idx) => activeTeam.clients[idx]
+            );
+            dispatch({ type: 'SET_CLIENTS_ORDER', teamId: activeTeam.id, clients: reorderedClients });
+          }
+        }
+      }
+    );
+  };
+
+  // Add a break after a client
+  const addBreak = (afterClientId: string) => {
+    dispatch({
+      type: 'ADD_BREAK',
+      teamId: activeTeam.id,
+      afterClientId,
+      breakItem: {
+        id: generateId(),
+        afterClientId,
+        durationMinutes: 30,
+        label: 'Lunch Break',
+      },
+    });
+  };
+
+  // Get travel segment between two points
+  const getTravelSegment = (fromId: string, toId: string): TravelSegmentType | undefined => {
+    return activeTeam.travelSegments.get(`${fromId}->${toId}`);
+  };
+
+  return (
+    <APIProvider apiKey={MAPS_KEY} libraries={['places', 'routes']}>
+      <MapsInitializer onServiceReady={setDirectionsService} />
+      <div className="h-full flex flex-col">
+        {/* Ownership banner */}
+        <div className="shrink-0 bg-slate-900 text-white/70 text-center text-[11px] tracking-wide py-1.5 font-medium">
+          Privately owned software by <span className="text-white">Riley Tech Studio</span> — <span className="text-amber-400">Beta Demonstration Build</span>
+        </div>
+
+        {/* Navbar */}
+        <header className="glass-navbar shrink-0 z-50 px-4 lg:px-6">
+          <div className="flex items-center justify-between h-16">
+            {/* Logo */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                  <path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z" />
+                  <circle cx="12" cy="10" r="3" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-base font-bold text-text-primary tracking-tight">CleanRoute Pro</h1>
+                <p className="text-xs text-text-tertiary hidden sm:block">Smart Route Scheduling</p>
+              </div>
+            </div>
+
+            {/* Date display */}
+            <div className="hidden md:flex items-center gap-2 bg-surface-elevated rounded-xl px-4 py-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-primary">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              <span className="text-sm font-medium text-text-primary">
+                {formatDateDisplay(state.selectedDate)}
+              </span>
+            </div>
+
+            {/* Mobile map toggle */}
+            <button
+              onClick={() => setMobileShowMap(!mobileShowMap)}
+              className="md:hidden btn-ghost"
+            >
+              {mobileShowMap ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <line x1="3" y1="9" x2="21" y2="9" />
+                  <line x1="3" y1="15" x2="21" y2="15" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                  <line x1="8" y1="2" x2="8" y2="18" />
+                  <line x1="16" y1="6" x2="16" y2="22" />
+                </svg>
+              )}
+            </button>
+          </div>
+
+          {/* Team tabs */}
+          <div className="pb-3 -mx-1 overflow-x-auto">
+            <TeamTabs
+              state={state}
+              dispatch={dispatch}
+              onSelectTeam={(teamId) => {
+                dispatch({ type: 'SET_ACTIVE_TEAM', teamId });
+              }}
+            />
+          </div>
+        </header>
+
+        {/* Main content */}
+        <div className="flex-1 flex min-h-0">
+          {/* Schedule Panel */}
+          <div
+            className={`${mobileShowMap ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-[420px] lg:w-[460px] shrink-0 border-r border-border-light bg-white/50`}
+          >
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+              {/* Base Address */}
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="card p-4"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-8 h-8 rounded-lg bg-surface-elevated flex items-center justify-center text-lg">
+                    🏠
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-primary">Base Address</h3>
+                    <p className="text-xs text-text-tertiary">Starting & return point</p>
+                  </div>
+                </div>
+                <PlacesAutocomplete
+                  onPlaceSelect={(location) =>
+                    dispatch({ type: 'SET_BASE_ADDRESS', teamId: activeTeam.id, location })
+                  }
+                  defaultValue={activeTeam.baseAddress?.address || ''}
+                  placeholder="Enter your base address..."
+                  className="text-sm"
+                  id="base-address-input"
+                />
+
+                {/* Start time */}
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xs text-text-secondary">Day starts at</span>
+                  <input
+                    type="time"
+                    value={activeTeam.dayStartTime}
+                    onChange={(e) =>
+                      dispatch({ type: 'SET_START_TIME', teamId: activeTeam.id, time: e.target.value })
+                    }
+                    className="text-sm font-medium bg-surface-elevated border border-border-light rounded-lg px-3 py-1.5 outline-none focus:border-primary"
+                  />
+                </div>
+              </motion.div>
+
+              {/* Optimize Route Button */}
+              {activeTeam.clients.length >= 2 && activeTeam.baseAddress && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center gap-2"
+                >
+                  <button
+                    onClick={optimizeRoute}
+                    className="btn-secondary text-xs flex-1"
+                    style={{ borderColor: `${activeTeam.color.primary}30`, color: activeTeam.color.primary }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M16 3h5v5" />
+                      <path d="M8 3H3v5" />
+                      <path d="M21 3l-7 7" />
+                      <path d="M3 3l7 7" />
+                      <path d="M16 21h5v-5" />
+                      <path d="M8 21H3v-5" />
+                      <path d="M21 21l-7-7" />
+                      <path d="M3 21l7-7" />
+                    </svg>
+                    Optimize Route Order
+                  </button>
+                </motion.div>
+              )}
+
+              {/* Client Cards with Travel Segments */}
+              <AnimatePresence mode="popLayout">
+                {activeTeam.clients.map((client, index) => {
+                  const prevId = index === 0 ? 'base' : activeTeam.clients[index - 1].id;
+                  const segment = getTravelSegment(prevId, client.id);
+                  const breakAfterThis = activeTeam.breaks.find((b) => b.afterClientId === client.id);
+
+                  return (
+                    <motion.div key={client.id} layout>
+                      {/* Travel segment */}
+                      {activeTeam.baseAddress && (
+                        <TravelSegmentComponent
+                          segment={segment}
+                          teamColor={activeTeam.color.primary}
+                        />
+                      )}
+
+                      {/* Client card */}
+                      <ClientCard
+                        client={client}
+                        index={index}
+                        totalClients={activeTeam.clients.length}
+                        team={activeTeam}
+                        dispatch={dispatch}
+                      />
+
+                      {/* Break indicator or Add Break button */}
+                      {breakAfterThis ? (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="flex items-center gap-2 py-1 pl-5 ml-4"
+                        >
+                          <div className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-warning-light text-warning border border-amber-200">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M17 8h1a4 4 0 1 1 0 8h-1" />
+                              <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z" />
+                              <line x1="6" y1="2" x2="6" y2="4" />
+                              <line x1="10" y1="2" x2="10" y2="4" />
+                              <line x1="14" y1="2" x2="14" y2="4" />
+                            </svg>
+                            {breakAfterThis.label} · {breakAfterThis.durationMinutes}m
+                          </div>
+                          <button
+                            onClick={() => dispatch({ type: 'REMOVE_BREAK', teamId: activeTeam.id, breakId: breakAfterThis.id })}
+                            className="p-1 rounded hover:bg-danger-light text-text-tertiary hover:text-danger transition-colors"
+                            title="Remove break"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </motion.div>
+                      ) : index < activeTeam.clients.length - 1 ? (
+                        <div className="flex justify-center py-0.5">
+                          <button
+                            onClick={() => addBreak(client.id)}
+                            className="text-xs text-text-tertiary hover:text-warning transition-colors opacity-0 hover:opacity-100 px-2 py-0.5"
+                            title="Add break after this client"
+                          >
+                            + break
+                          </button>
+                        </div>
+                      ) : null}
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+
+              {/* Return to base segment */}
+              {activeTeam.clients.length > 0 && activeTeam.baseAddress && (
+                <>
+                  <TravelSegmentComponent
+                    segment={getTravelSegment(
+                      activeTeam.clients[activeTeam.clients.length - 1].id,
+                      'base-return'
+                    )}
+                    teamColor={activeTeam.color.primary}
+                  />
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="card p-3 flex items-center gap-3 opacity-70"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-surface-elevated flex items-center justify-center text-sm">
+                      🏠
+                    </div>
+                    <span className="text-sm text-text-secondary font-medium">Return to Base</span>
+                  </motion.div>
+                </>
+              )}
+
+              {/* Add Client Button */}
+              <div className="pt-1">
+                <AddClientButton
+                  teamId={activeTeam.id}
+                  teamColor={activeTeam.color.primary}
+                  dispatch={dispatch}
+                />
+              </div>
+
+              {/* Daily Summary */}
+              {activeTeam.clients.length > 0 && (
+                <div className="pt-2">
+                  <DailySummaryCard team={activeTeam} summary={summary} dispatch={dispatch} />
+                </div>
+              )}
+
+              {/* Empty state */}
+              {activeTeam.clients.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-center py-12"
+                >
+                  <div className="w-16 h-16 rounded-2xl bg-surface-elevated flex items-center justify-center mx-auto mb-4 text-2xl">
+                    📍
+                  </div>
+                  <h3 className="text-sm font-semibold text-text-primary mb-1">No clients yet</h3>
+                  <p className="text-xs text-text-tertiary max-w-[240px] mx-auto">
+                    Set your base address above, then add clients to start building your route.
+                  </p>
+                </motion.div>
+              )}
+            </div>
+          </div>
+
+          {/* Map Panel */}
+          <div className={`${mobileShowMap ? 'flex' : 'hidden md:flex'} flex-1 relative`}>
+            <Map
+              defaultCenter={{ lat: -33.8688, lng: 151.2093 }} // Sydney default
+              defaultZoom={11}
+              mapId="cleanroute-map"
+              gestureHandling="greedy"
+              disableDefaultUI={false}
+              zoomControl={true}
+              streetViewControl={false}
+              mapTypeControl={false}
+              fullscreenControl={true}
+              className="w-full h-full"
+            >
+              <RouteMap team={activeTeam} />
+            </Map>
+
+            {/* Map overlay - team indicator */}
+            <div className="absolute top-4 left-4 glass-panel rounded-xl px-4 py-2.5 flex items-center gap-2.5">
+              <div
+                className="team-dot animate-pulse-dot"
+                style={{ backgroundColor: activeTeam.color.primary }}
+              />
+              <span className="text-sm font-semibold text-text-primary">{activeTeam.name}</span>
+              {activeTeam.clients.length > 0 && (
+                <span className="text-xs text-text-secondary">
+                  · {activeTeam.clients.length} stop{activeTeam.clients.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </APIProvider>
+  );
+}
+
+// Helper component to initialize DirectionsService
+function MapsInitializer({ onServiceReady }: { onServiceReady: (service: google.maps.DirectionsService) => void }) {
+  const routesLibrary = useMapsLibrary('routes');
+
+  useEffect(() => {
+    if (!routesLibrary) return;
+    const service = new routesLibrary.DirectionsService();
+    onServiceReady(service);
+  }, [routesLibrary, onServiceReady]);
+
+  return null;
 }
