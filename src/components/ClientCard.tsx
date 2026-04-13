@@ -1,9 +1,10 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import PlacesAutocomplete from './PlacesAutocomplete';
 import { formatTimeDisplay, JOB_DURATIONS } from '@/lib/timeUtils';
-import { Client, ScheduleAction, TeamSchedule } from '@/lib/types';
+import { Client, Location, ScheduleAction, TeamSchedule } from '@/lib/types';
 
 interface ClientCardProps {
   client: Client;
@@ -14,6 +15,91 @@ interface ClientCardProps {
 }
 
 export default function ClientCard({ client, index, totalClients, team, dispatch }: ClientCardProps) {
+  const [addressText, setAddressText] = useState('');
+  const [hasEdited, setHasEdited] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const [addressVersion, setAddressVersion] = useState(0);
+
+  // Resolve address via Places AutocompleteService (same as AddClientButton)
+  const resolveAddress = useCallback(async (text: string): Promise<Location | null> => {
+    if (!window.google?.maps) return null;
+
+    const autocompleteService = new google.maps.places.AutocompleteService();
+
+    return new Promise((resolve) => {
+      autocompleteService.getPlacePredictions(
+        {
+          input: text,
+          componentRestrictions: { country: 'au' },
+          types: ['address'],
+        },
+        (predictions, status) => {
+          if (
+            status !== google.maps.places.PlacesServiceStatus.OK ||
+            !predictions ||
+            predictions.length === 0
+          ) {
+            resolve(null);
+            return;
+          }
+
+          const topPrediction = predictions[0];
+          const tempDiv = document.createElement('div');
+          const placesService = new google.maps.places.PlacesService(tempDiv);
+
+          placesService.getDetails(
+            {
+              placeId: topPrediction.place_id,
+              fields: ['formatted_address', 'geometry', 'place_id', 'name'],
+            },
+            (place, detailsStatus) => {
+              if (
+                detailsStatus === google.maps.places.PlacesServiceStatus.OK &&
+                place?.geometry?.location
+              ) {
+                resolve({
+                  address: place.formatted_address || place.name || topPrediction.description,
+                  lat: place.geometry.location.lat(),
+                  lng: place.geometry.location.lng(),
+                  placeId: place.place_id,
+                });
+              } else {
+                resolve(null);
+              }
+            }
+          );
+        }
+      );
+    });
+  }, []);
+
+  const handleConfirmAddress = async () => {
+    const text = addressText.trim();
+    if (!text) return;
+
+    setIsResolving(true);
+    const resolved = await resolveAddress(text);
+    setIsResolving(false);
+
+    if (resolved) {
+      dispatch({
+        type: 'UPDATE_CLIENT',
+        teamId: team.id,
+        clientId: client.id,
+        updates: { location: resolved },
+      });
+      setHasEdited(false);
+      setAddressText('');
+      setAddressVersion((v) => v + 1);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setHasEdited(false);
+    setAddressText('');
+    setAddressVersion((v) => v + 1);
+  };
+
   return (
     <motion.div
       layout
@@ -114,19 +200,75 @@ export default function ClientCard({ client, index, totalClients, team, dispatch
 
       {/* Address — editable inline (swap client by changing address) */}
       <div className="mb-3">
-        <PlacesAutocomplete
-          onPlaceSelect={(location) =>
-            dispatch({
-              type: 'UPDATE_CLIENT',
-              teamId: team.id,
-              clientId: client.id,
-              updates: { location },
-            })
-          }
-          defaultValue={client.location.address}
-          placeholder="Enter client address..."
-          className="text-sm"
-        />
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1">
+            <PlacesAutocomplete
+              key={`addr-${client.id}-${addressVersion}`}
+              onPlaceSelect={(location) => {
+                dispatch({
+                  type: 'UPDATE_CLIENT',
+                  teamId: team.id,
+                  clientId: client.id,
+                  updates: { location },
+                });
+                setHasEdited(false);
+                setAddressText('');
+              }}
+              onTextChange={(text) => {
+                setAddressText(text);
+                // Show confirm/cancel buttons when text differs from current address
+                if (text !== client.location.address) {
+                  setHasEdited(true);
+                } else {
+                  setHasEdited(false);
+                }
+              }}
+              defaultValue={client.location.address}
+              placeholder="Enter client address..."
+              className="text-sm"
+            />
+          </div>
+
+          {/* Confirm / Cancel buttons — appear when address text has been edited */}
+          <AnimatePresence>
+            {hasEdited && addressText.trim().length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8, width: 0 }}
+                animate={{ opacity: 1, scale: 1, width: 'auto' }}
+                exit={{ opacity: 0, scale: 0.8, width: 0 }}
+                className="flex items-center gap-1 shrink-0 overflow-hidden"
+              >
+                {/* Confirm (tick) */}
+                <button
+                  onClick={handleConfirmAddress}
+                  disabled={isResolving}
+                  className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-50"
+                  title="Confirm address change"
+                >
+                  {isResolving ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </button>
+                {/* Cancel (x) */}
+                <button
+                  onClick={handleCancelEdit}
+                  className="p-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
+                  title="Cancel address change"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
       {/* Duration selector + Time display */}

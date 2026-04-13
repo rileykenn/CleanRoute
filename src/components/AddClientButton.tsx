@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useMap } from '@vis.gl/react-google-maps';
 import { motion, AnimatePresence } from 'framer-motion';
 import PlacesAutocomplete from './PlacesAutocomplete';
 import { JOB_DURATIONS, generateId } from '@/lib/timeUtils';
@@ -16,21 +17,103 @@ export default function AddClientButton({ teamId, teamColor, dispatch }: AddClie
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState('');
   const [location, setLocation] = useState<Location | null>(null);
+  const [addressText, setAddressText] = useState('');
   const [duration, setDuration] = useState(90);
+  const [isResolving, setIsResolving] = useState(false);
+  const map = useMap();
 
-  const handleSubmit = () => {
-    if (!location) return;
+  // Geocode fallback — resolve raw text to a valid Google address
+  const geocodeAddress = useCallback(async (text: string): Promise<Location | null> => {
+    if (!window.google?.maps) return null;
+    
+    const autocompleteService = new google.maps.places.AutocompleteService();
+    
+    // Step 1: Get the top autocomplete prediction (same as what appears in the dropdown)
+    return new Promise((resolve) => {
+      autocompleteService.getPlacePredictions(
+        {
+          input: text,
+          componentRestrictions: { country: 'au' },
+          types: ['address'],
+        },
+        (predictions, status) => {
+          if (
+            status !== google.maps.places.PlacesServiceStatus.OK ||
+            !predictions ||
+            predictions.length === 0
+          ) {
+            resolve(null);
+            return;
+          }
 
+          // Step 2: Get full place details (lat/lng) for the top prediction
+          const topPrediction = predictions[0];
+          
+          // Use a temporary hidden div for PlacesService (required by Google)
+          const tempDiv = document.createElement('div');
+          const placesService = new google.maps.places.PlacesService(tempDiv);
+
+          placesService.getDetails(
+            {
+              placeId: topPrediction.place_id,
+              fields: ['formatted_address', 'geometry', 'place_id', 'name'],
+            },
+            (place, detailsStatus) => {
+              if (
+                detailsStatus === google.maps.places.PlacesServiceStatus.OK &&
+                place?.geometry?.location
+              ) {
+                resolve({
+                  address: place.formatted_address || place.name || topPrediction.description,
+                  lat: place.geometry.location.lat(),
+                  lng: place.geometry.location.lng(),
+                  placeId: place.place_id,
+                });
+              } else {
+                resolve(null);
+              }
+            }
+          );
+        }
+      );
+    });
+  }, []);
+
+  const handleSubmit = async () => {
+    // If location is already set (user selected from autocomplete), use it directly
+    if (location) {
+      addClient(location);
+      return;
+    }
+
+    // Fallback: user typed an address but didn't select from autocomplete
+    const text = addressText.trim();
+    if (!text) return;
+
+    setIsResolving(true);
+    const resolved = await geocodeAddress(text);
+    setIsResolving(false);
+
+    if (resolved) {
+      addClient(resolved);
+    } else {
+      // Could not resolve — give a visual hint
+      alert('Could not find that address. Please check the spelling or select from the dropdown suggestions.');
+    }
+  };
+
+  const addClient = (loc: Location) => {
     const client: Client = {
       id: generateId(),
       name: name || `Client`,
-      location,
+      location: loc,
       jobDurationMinutes: duration,
     };
 
     dispatch({ type: 'ADD_CLIENT', teamId, client });
     setName('');
     setLocation(null);
+    setAddressText('');
     setDuration(90);
     setIsOpen(false);
   };
@@ -39,8 +122,11 @@ export default function AddClientButton({ teamId, teamColor, dispatch }: AddClie
     setIsOpen(false);
     setName('');
     setLocation(null);
+    setAddressText('');
     setDuration(90);
   };
+
+  const hasInput = !!location || addressText.trim().length > 0;
 
   return (
     <div>
@@ -102,7 +188,17 @@ export default function AddClientButton({ teamId, teamColor, dispatch }: AddClie
 
               {/* Address */}
               <PlacesAutocomplete
-                onPlaceSelect={(loc) => setLocation(loc)}
+                onPlaceSelect={(loc) => {
+                  setLocation(loc);
+                  setAddressText(loc.address);
+                }}
+                onTextChange={(text) => {
+                  setAddressText(text);
+                  // Clear the resolved location when they start typing something new
+                  if (location && text !== location.address) {
+                    setLocation(null);
+                  }
+                }}
                 placeholder="Enter client address..."
                 className="text-sm"
               />
@@ -131,13 +227,13 @@ export default function AddClientButton({ teamId, teamColor, dispatch }: AddClie
               <div className="flex items-center gap-2 pt-1">
                 <button
                   onClick={handleSubmit}
-                  disabled={!location}
+                  disabled={!hasInput || isResolving}
                   className="btn-primary flex-1 text-sm py-2.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
                   style={{
-                    backgroundColor: location ? teamColor : undefined,
+                    backgroundColor: hasInput && !isResolving ? teamColor : undefined,
                   }}
                 >
-                  Add to Schedule
+                  {isResolving ? 'Finding address...' : 'Add to Schedule'}
                 </button>
                 <button onClick={handleCancel} className="btn-ghost text-sm">
                   Cancel

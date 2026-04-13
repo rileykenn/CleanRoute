@@ -6,6 +6,7 @@ import { Location } from '@/lib/types';
 
 interface PlacesAutocompleteProps {
   onPlaceSelect: (location: Location) => void;
+  onTextChange?: (text: string) => void;
   placeholder?: string;
   defaultValue?: string;
   className?: string;
@@ -14,6 +15,7 @@ interface PlacesAutocompleteProps {
 
 export default function PlacesAutocomplete({
   onPlaceSelect,
+  onTextChange,
   placeholder = 'Search address...',
   defaultValue = '',
   className = '',
@@ -79,7 +81,10 @@ export default function PlacesAutocomplete({
       id={id}
       type="text"
       value={value}
-      onChange={(e) => setValue(e.target.value)}
+      onChange={(e) => {
+        setValue(e.target.value);
+        onTextChange?.(e.target.value);
+      }}
       placeholder={placeholder}
       className={`input-field ${className}`}
       autoComplete="off"
