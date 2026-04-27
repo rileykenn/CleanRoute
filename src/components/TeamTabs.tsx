@@ -16,6 +16,9 @@ export default function TeamTabs({ state, dispatch, onSelectTeam }: TeamTabsProp
     <div className="flex items-center gap-2 px-1">
       {teams.map((team, index) => {
         const isActive = team.id === activeTeamId;
+        // Total staff headcount for this team (sum of staffCount across all clients)
+        const totalStaff = team.clients.reduce((sum, c) => Math.max(sum, c.staffCount || 1), 0);
+        const uniqueStaffCount = team.clients.length > 0 ? totalStaff : 0;
         return (
           <motion.div
             key={team.id}
@@ -46,6 +49,20 @@ export default function TeamTabs({ state, dispatch, onSelectTeam }: TeamTabsProp
               </span>
             )}
 
+            {/* Staff headcount indicator */}
+            {uniqueStaffCount > 0 && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                style={{
+                  backgroundColor: isActive ? `${team.color.primary}20` : '#F3F4F6',
+                  color: isActive ? team.color.text : '#9CA3AF',
+                }}
+                title={`Max ${uniqueStaffCount} staff on a single job`}
+              >
+                👤 {uniqueStaffCount}
+              </span>
+            )}
+
             {/* Remove team button */}
             {teams.length > 1 && isActive && (
               <span
@@ -73,22 +90,20 @@ export default function TeamTabs({ state, dispatch, onSelectTeam }: TeamTabsProp
         );
       })}
 
-      {/* Add team button */}
-      {teams.length < TEAM_COLORS.length && (
-        <motion.button
-          onClick={() => dispatch({ type: 'ADD_TEAM' })}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-text-tertiary
-                   hover:text-text-secondary hover:bg-surface-hover transition-all cursor-pointer"
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Add Team
-        </motion.button>
-      )}
+      {/* Add team button — unlimited teams per scope */}
+      <motion.button
+        onClick={() => dispatch({ type: 'ADD_TEAM' })}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-text-tertiary
+                 hover:text-text-secondary hover:bg-surface-hover transition-all cursor-pointer"
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        Add Team
+      </motion.button>
     </div>
   );
 }

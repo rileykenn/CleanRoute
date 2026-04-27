@@ -108,6 +108,8 @@ export default function AddClientButton({ teamId, teamColor, dispatch }: AddClie
       name: name || `Client`,
       location: loc,
       jobDurationMinutes: duration,
+      staffCount: 1,
+      isLocked: false,
     };
 
     dispatch({ type: 'ADD_CLIENT', teamId, client });

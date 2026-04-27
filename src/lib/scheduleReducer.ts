@@ -20,6 +20,7 @@ function createDefaultTeam(index: number): TeamSchedule {
     hourlyRate: 38,
     fuelEfficiency: 10,  // L/100km
     fuelPrice: 1.85,     // $/L
+    perKmRate: 0,        // $/km allowance (disabled by default)
   };
 }
 
@@ -210,11 +211,38 @@ export function scheduleReducer(state: AppState, action: ScheduleAction): AppSta
       };
     }
 
+    case 'SET_PER_KM_RATE': {
+      return {
+        ...state,
+        teams: state.teams.map((t) =>
+          t.id === action.teamId ? { ...t, perKmRate: action.rate } : t
+        ),
+      };
+    }
+
     case 'SET_CLIENTS_ORDER': {
       return {
         ...state,
         teams: state.teams.map((t) =>
           t.id === action.teamId ? { ...t, clients: action.clients } : t
+        ),
+      };
+    }
+
+    case 'SET_FIXED_START_TIME': {
+      return {
+        ...state,
+        teams: state.teams.map((t) =>
+          t.id === action.teamId
+            ? {
+                ...t,
+                clients: t.clients.map((c) =>
+                  c.id === action.clientId
+                    ? { ...c, fixedStartTime: action.time }
+                    : c
+                ),
+              }
+            : t
         ),
       };
     }

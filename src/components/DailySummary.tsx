@@ -79,6 +79,7 @@ export default function DailySummaryCard({ team, summary, dispatch }: DailySumma
         <div className="bg-surface-elevated rounded-xl p-3">
           <div className="text-xs text-text-tertiary mb-1">Job Time</div>
           <div className="text-xl font-bold text-text-primary">{formatDuration(summary.totalJobMinutes)}</div>
+          <div className="text-[11px] text-text-tertiary mt-0.5">{(summary.totalJobMinutes / 60).toFixed(2)} hrs</div>
         </div>
 
         {/* Travel Time */}
@@ -101,6 +102,7 @@ export default function DailySummaryCard({ team, summary, dispatch }: DailySumma
         <div className="bg-surface-elevated rounded-xl p-3">
           <div className="text-xs text-text-tertiary mb-1">Total Work</div>
           <div className="text-xl font-bold text-text-primary">{formatDuration(summary.totalWorkMinutes)}</div>
+          <div className="text-[11px] text-text-tertiary mt-0.5">{(summary.totalWorkMinutes / 60).toFixed(2)} hrs</div>
         </div>
 
         {/* Wage */}
@@ -169,6 +171,37 @@ export default function DailySummaryCard({ team, summary, dispatch }: DailySumma
               />
             </label>
           </div>
+        </div>
+
+        {/* Per-KM Allowance — spans full width */}
+        <div className="col-span-2 rounded-xl p-3 bg-surface-elevated border border-border-light">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={team.color.primary} strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span className="text-xs font-semibold text-text-primary">Per-KM Allowance</span>
+            </div>
+            <div className="text-lg font-bold" style={{ color: team.color.primary }}>
+              ${summary.perKmCost.toFixed(2)}
+            </div>
+          </div>
+          <label className="flex items-center gap-1.5 text-xs">
+            <span className="text-text-tertiary">$/km</span>
+            <input
+              type="number"
+              value={team.perKmRate}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value) || 0;
+                dispatch({ type: 'SET_PER_KM_RATE', teamId: team.id, rate: val });
+              }}
+              className="w-16 text-center font-medium bg-white border border-border-light rounded-lg px-2 py-1 outline-none focus:border-primary"
+              min={0}
+              step={0.01}
+            />
+          </label>
         </div>
       </div>
 

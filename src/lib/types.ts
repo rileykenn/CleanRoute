@@ -10,9 +10,13 @@ export interface Client {
   name: string;
   location: Location;
   jobDurationMinutes: number;
-  startTime?: string; // "09:00" format
-  endTime?: string;   // "10:30" format
+  staffCount: number;       // 1, 2, 3+ — per-job staff assignment
+  isLocked: boolean;        // exclude from route optimisation
+  startTime?: string;       // "09:00" format
+  endTime?: string;         // "10:30" format
+  fixedStartTime?: string;  // locked start time (e.g. "09:00") — schedule recalculates around this
   notes?: string;
+  savedClientId?: string;   // reference to saved client in DB
 }
 
 export interface TravelSegment {
@@ -44,6 +48,7 @@ export interface TeamSchedule {
   hourlyRate: number;
   fuelEfficiency: number; // L/100km
   fuelPrice: number;      // $/L
+  perKmRate: number;      // $/km allowance
 }
 
 export interface TeamColor {
@@ -62,6 +67,7 @@ export interface DaySummary {
   totalWorkMinutes: number; // job + travel + breaks
   wageAmount: number;
   fuelCost: number;
+  perKmCost: number;
   clientCount: number;
 }
 
@@ -118,6 +124,7 @@ export type ScheduleAction =
   | { type: 'SET_START_TIME'; teamId: string; time: string }
   | { type: 'SET_HOURLY_RATE'; teamId: string; rate: number }
   | { type: 'SET_FUEL_SETTINGS'; teamId: string; fuelEfficiency: number; fuelPrice: number }
+  | { type: 'SET_PER_KM_RATE'; teamId: string; rate: number }
   | { type: 'ADD_TEAM' }
   | { type: 'REMOVE_TEAM'; teamId: string }
   | { type: 'UPDATE_TRAVEL'; teamId: string; segment: TravelSegment }
@@ -125,7 +132,8 @@ export type ScheduleAction =
   | { type: 'REMOVE_BREAK'; teamId: string; breakId: string }
   | { type: 'CLEAR_TRAVEL'; teamId: string }
   | { type: 'SET_CLIENT_TIMES'; teamId: string; clients: Client[] }
-  | { type: 'SET_CLIENTS_ORDER'; teamId: string; clients: Client[] };
+  | { type: 'SET_CLIENTS_ORDER'; teamId: string; clients: Client[] }
+  | { type: 'SET_FIXED_START_TIME'; teamId: string; clientId: string; time: string | undefined };
 
 export interface AppState {
   teams: TeamSchedule[];
