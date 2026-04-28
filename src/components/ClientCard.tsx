@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import PlacesAutocomplete from './PlacesAutocomplete';
 import { formatTimeDisplay } from '@/lib/timeUtils';
 import { Client, Location, ScheduleAction, TeamSchedule } from '@/lib/types';
+
+const StaffChecklistView = lazy(() => import('./StaffChecklistView'));
 
 interface ClientCardProps {
   client: Client;
@@ -20,6 +22,7 @@ export default function ClientCard({ client, index, totalClients, team, dispatch
   const [isResolving, setIsResolving] = useState(false);
   const [addressVersion, setAddressVersion] = useState(0);
   const [editingStartTime, setEditingStartTime] = useState(false);
+  const [showChecklist, setShowChecklist] = useState(false);
 
   const resolveAddress = useCallback(async (text: string): Promise<Location | null> => {
     if (!window.google?.maps) return null;
@@ -110,7 +113,7 @@ export default function ClientCard({ client, index, totalClients, team, dispatch
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
           {/* Pin start time */}
           <button
             onClick={() => setEditingStartTime(!editingStartTime)}
@@ -136,6 +139,16 @@ export default function ClientCard({ client, index, totalClients, team, dispatch
               )}
             </svg>
           </button>
+          {/* Checklist */}
+          <button
+            onClick={() => setShowChecklist(true)}
+            className="p-1.5 rounded-lg hover:bg-surface-elevated text-text-tertiary hover:text-emerald-600 transition-colors"
+            title="Open checklist"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+          </button>
           {/* Navigate */}
           <a
             href={mapsNavUrl}
@@ -147,6 +160,7 @@ export default function ClientCard({ client, index, totalClients, team, dispatch
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polygon points="3 11 22 2 13 21 11 13 3 11" />
             </svg>
+            <span className="sr-only md:hidden">Navigate</span>
           </a>
           {/* Move up */}
           {index > 0 && (
@@ -290,6 +304,19 @@ export default function ClientCard({ client, index, totalClients, team, dispatch
           </motion.div>
         )}
       </div>
+
+      {/* Checklist Modal */}
+      <AnimatePresence>
+        {showChecklist && (
+          <Suspense fallback={null}>
+            <StaffChecklistView
+              clientId={client.savedClientId || client.id}
+              clientName={client.name}
+              onClose={() => setShowChecklist(false)}
+            />
+          </Suspense>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

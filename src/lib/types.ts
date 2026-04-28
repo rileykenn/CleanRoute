@@ -133,7 +133,8 @@ export type ScheduleAction =
   | { type: 'CLEAR_TRAVEL'; teamId: string }
   | { type: 'SET_CLIENT_TIMES'; teamId: string; clients: Client[] }
   | { type: 'SET_CLIENTS_ORDER'; teamId: string; clients: Client[] }
-  | { type: 'SET_FIXED_START_TIME'; teamId: string; clientId: string; time: string | undefined };
+  | { type: 'SET_FIXED_START_TIME'; teamId: string; clientId: string; time: string | undefined }
+  | { type: 'LOAD_STATE'; teams: TeamSchedule[]; activeTeamId: string; selectedDate: string };
 
 export interface AppState {
   teams: TeamSchedule[];

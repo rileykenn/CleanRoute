@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase/client';
 
@@ -12,7 +12,12 @@ interface StaffMember {
   staff_role: string;
   is_active: boolean;
   team_assignment: string;
-  availability: Record<string, boolean>; // { "monday": true, "tuesday": false, ... }
+  availability: Record<string, boolean>;
+}
+
+interface Team {
+  id: string;
+  name: string;
 }
 
 const DAYS_OF_WEEK = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -22,7 +27,7 @@ const DAY_LABELS: Record<string, string> = {
 };
 
 export default function StaffPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -38,6 +43,7 @@ export default function StaffPage() {
   );
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [teams, setTeams] = useState<Team[]>([]);
 
   const loadStaff = useCallback(async () => {
     const { data } = await supabase.from('staff_members').select('*').order('name');
@@ -55,6 +61,10 @@ export default function StaffPage() {
     };
     init();
     loadStaff();
+    // Load teams
+    supabase.from('teams').select('id, name').order('sort_order').then(({ data }) => {
+      if (data) setTeams(data);
+    });
   }, [supabase, loadStaff]);
 
   const resetForm = () => {
@@ -236,7 +246,10 @@ export default function StaffPage() {
                     </select>
                   </div>
                   <div><label className="block text-sm font-medium text-text-secondary mb-1.5">Team Assignment</label>
-                    <input type="text" value={formTeam} onChange={(e) => setFormTeam(e.target.value)} className="input-field" placeholder="e.g. Team 1" />
+                    <select value={formTeam} onChange={(e) => setFormTeam(e.target.value)} className="input-field">
+                      <option value="">Unassigned</option>
+                      {teams.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                    </select>
                   </div>
                 </div>
 

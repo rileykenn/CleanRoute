@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase/client';
 
@@ -17,10 +17,16 @@ interface SavedClient {
   default_staff_count: number;
   notes: string;
   created_at: string;
+  checklist_template_id: string | null;
+}
+
+interface ChecklistTemplate {
+  id: string;
+  name: string;
 }
 
 export default function ClientsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [clients, setClients] = useState<SavedClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -34,6 +40,8 @@ export default function ClientsPage() {
   const [formDuration, setFormDuration] = useState(1.5);
   const [formStaff, setFormStaff] = useState(1);
   const [formNotes, setFormNotes] = useState('');
+  const [formChecklistId, setFormChecklistId] = useState<string | null>(null);
+  const [checklistTemplates, setChecklistTemplates] = useState<ChecklistTemplate[]>([]);
   const [saving, setSaving] = useState(false);
 
   const loadClients = useCallback(async () => {
@@ -52,6 +60,10 @@ export default function ClientsPage() {
     };
     init();
     loadClients();
+    // Load checklist templates
+    supabase.from('checklist_templates').select('id, name').order('name').then(({ data }) => {
+      if (data) setChecklistTemplates(data);
+    });
   }, [supabase, loadClients]);
 
   const filtered = clients.filter((c) =>
@@ -61,7 +73,7 @@ export default function ClientsPage() {
     (c.phone && c.phone.includes(search))
   );
 
-  const resetForm = () => { setFormName(''); setFormAddress(''); setFormEmail(''); setFormPhone(''); setFormDuration(1.5); setFormStaff(1); setFormNotes(''); setEditId(null); };
+  const resetForm = () => { setFormName(''); setFormAddress(''); setFormEmail(''); setFormPhone(''); setFormDuration(1.5); setFormStaff(1); setFormNotes(''); setFormChecklistId(null); setEditId(null); };
 
   const openEdit = (c: SavedClient) => {
     setFormName(c.name);
@@ -71,6 +83,7 @@ export default function ClientsPage() {
     setFormDuration(c.default_duration_minutes / 60);
     setFormStaff(c.default_staff_count);
     setFormNotes(c.notes || '');
+    setFormChecklistId(c.checklist_template_id || null);
     setEditId(c.id);
     setShowAdd(true);
   };
@@ -83,6 +96,7 @@ export default function ClientsPage() {
       email: formEmail, phone: formPhone,
       default_duration_minutes: Math.round(formDuration * 60),
       default_staff_count: formStaff, notes: formNotes,
+      checklist_template_id: formChecklistId || null,
     };
     if (editId) { await supabase.from('clients').update(data).eq('id', editId); }
     else { await supabase.from('clients').insert(data); }
@@ -146,6 +160,11 @@ export default function ClientsPage() {
                         </span>
                       )}
                       {c.notes && <span className="text-xs text-text-tertiary truncate max-w-[200px]">📝 {c.notes}</span>}
+                      {c.checklist_template_id && (
+                        <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-medium">
+                          ✅ {checklistTemplates.find((t) => t.id === c.checklist_template_id)?.name || 'Checklist'}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -179,6 +198,12 @@ export default function ClientsPage() {
                   <div><label className="block text-sm font-medium text-text-secondary mb-1.5">Staff</label><select value={formStaff} onChange={(e) => setFormStaff(Number(e.target.value))} className="input-field"><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4+</option></select></div>
                 </div>
                 <div><label className="block text-sm font-medium text-text-secondary mb-1.5">Notes</label><textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} className="input-field resize-none" rows={2} placeholder="Access codes, special instructions..." /></div>
+                <div><label className="block text-sm font-medium text-text-secondary mb-1.5">Checklist Template</label>
+                  <select value={formChecklistId || ''} onChange={(e) => setFormChecklistId(e.target.value || null)} className="input-field">
+                    <option value="">No checklist</option>
+                    {checklistTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
                 <div className="flex items-center gap-2 pt-2">
                   <button onClick={handleSave} disabled={!formName.trim() || saving} className="btn-primary flex-1 py-2.5 text-sm disabled:opacity-40">{saving ? 'Saving...' : editId ? 'Save Changes' : 'Add Client'}</button>
                   <button onClick={() => { setShowAdd(false); resetForm(); }} className="btn-ghost text-sm">Cancel</button>

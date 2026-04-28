@@ -7,9 +7,11 @@ interface TeamTabsProps {
   state: AppState;
   dispatch: React.Dispatch<ScheduleAction>;
   onSelectTeam: (teamId: string) => void;
+  onAddTeam?: () => void;
+  onRemoveTeam?: (teamId: string) => void;
 }
 
-export default function TeamTabs({ state, dispatch, onSelectTeam }: TeamTabsProps) {
+export default function TeamTabs({ state, dispatch, onSelectTeam, onAddTeam, onRemoveTeam }: TeamTabsProps) {
   const { teams, activeTeamId } = state;
 
   return (
@@ -70,12 +72,14 @@ export default function TeamTabs({ state, dispatch, onSelectTeam }: TeamTabsProp
                 tabIndex={0}
                 onClick={(e) => {
                   e.stopPropagation();
-                  dispatch({ type: 'REMOVE_TEAM', teamId: team.id });
+                  if (onRemoveTeam) onRemoveTeam(team.id);
+                  else dispatch({ type: 'REMOVE_TEAM', teamId: team.id });
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.stopPropagation();
-                    dispatch({ type: 'REMOVE_TEAM', teamId: team.id });
+                    if (onRemoveTeam) onRemoveTeam(team.id);
+                    else dispatch({ type: 'REMOVE_TEAM', teamId: team.id });
                   }
                 }}
                 className="ml-1 p-0.5 rounded hover:bg-white/60 text-current opacity-50 hover:opacity-100 transition-opacity"
@@ -92,7 +96,7 @@ export default function TeamTabs({ state, dispatch, onSelectTeam }: TeamTabsProp
 
       {/* Add team button — unlimited teams per scope */}
       <motion.button
-        onClick={() => dispatch({ type: 'ADD_TEAM' })}
+        onClick={() => { if (onAddTeam) onAddTeam(); else dispatch({ type: 'ADD_TEAM' }); }}
         className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-text-tertiary
                  hover:text-text-secondary hover:bg-surface-hover transition-all cursor-pointer"
         whileHover={{ scale: 1.02 }}

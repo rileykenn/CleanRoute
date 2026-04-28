@@ -247,6 +247,14 @@ export function scheduleReducer(state: AppState, action: ScheduleAction): AppSta
       };
     }
 
+    case 'LOAD_STATE': {
+      return {
+        teams: action.teams,
+        activeTeamId: action.activeTeamId,
+        selectedDate: action.selectedDate,
+      };
+    }
+
     default:
       return state;
   }
